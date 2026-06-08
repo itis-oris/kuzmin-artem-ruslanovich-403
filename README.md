@@ -1,1 +1,74 @@
-[![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/gYdPT_hR)
+# WildLife Zoo
+Кузьмин Артем
+
+Веб-приложение для зоопарка. Администрация ведёт учёт животных, вольеров и смотрителей, посетители просматривают животных и бронируют билеты на визит. Цена билетов считается в выбранной валюте по курсу из внешнего API.
+
+## Стек
+
+- **Java 17**, Spring Boot 3.5.0, Spring MVC, Spring Security
+- **FreeMarker** — шаблонизатор
+- **PostgreSQL** — основное хранилище
+- **Redis** + Spring Cache — кэш списков животных
+- **RestTemplate** — обращение к внешнему API курсов валют (exchangerate-api.com)
+- **Spring Data JPA** + Criteria API для нестандартных запросов
+- **Lombok**, **SpringDoc OpenAPI** (Swagger UI)
+- **Docker**, **Docker Compose**
+
+## Сущности
+
+6 JPA-сущностей:
+
+- `User` — email, хэш пароля (BCrypt), роль, список броней
+- `Animal` — кличка, вид (`AnimalSpecies`), путь к изображению, вольер
+- `Enclosure` — название вольера, тип (`OPEN`/`CLOSED`), животные, смотрители
+- `Keeper` — ФИО, должность, телефон, список вольеров
+- `Booking` — дата визита, валюта, итоговая цена, пользователь, билеты
+- `Ticket` — категория (`ADULT`/`STUDENT`/`CHILD`), цена, бронь
+
+Связи:
+- `User` <-> `Booking` — OneToMany
+- `Booking` <-> `Ticket` — OneToMany
+- `Animal` <-> `Enclosure` — ManyToOne
+- `Enclosure` <-> `Keeper` — ManyToMany через `enclosure_keepers`
+
+## Роли и доступ
+
+| Роль | Возможности                                                                                    |
+|---|------------------------------------------------------------------------------------------------|
+| Гость | Просмотр главной, витрины животных с фильтром по виду, регистрация и вход                      |
+| `ROLE_USER` | Всё из гостя + бронирование билетов, личный кабинет (брони, редактирование и удаление профиля) |
+| `ROLE_ADMIN` | Всё из User + создание животных, вольеров и смотрителей, отчёт по перегруженным вольерам       |
+
+Spring Security: аутентификация по email и паролю через форму логина, пароли хэшируются BCrypt, разделы `/admin/**` и `/booking`, `/profile` закрыты по ролям.
+
+## REST API
+
+- `GET /animals` — список животных с фильтром `?species=`
+- `GET /api/booking/calculate` — расчёт стоимости брони в выбранной валюте
+
+Swagger UI: `http://localhost:8090/swagger-ui.html`
+
+## Что ещё реализовано
+
+- **Внешний API курсов валют** — `CurrencyService` через `RestTemplate` запрашивает курс с exchangerate-api.com и пересчитывает цену билетов из рублей в выбранную валюту. Используется при сохранении брони и для расчёта цены на лету (фронт дёргает `/api/booking/calculate` через `fetch`)
+- **Кэширование** — списки животных кэшируются в Redis (`@Cacheable`), при добавлении животного кэш сбрасывается (`@CacheEvict`)
+- **Загрузка изображений** — `FileService` сохраняет фото животных с UUID-именами в папку `/uploads`, отдача настроена в `WebMvcConfig`
+- **Criteria API** — запрос перегруженных вольеров (больше 10 животных и не меньше 2 смотрителей)
+- **Глобальный обработчик исключений** — отдельные обработчики для HTML-страниц и для REST-ответов, набор собственных исключений
+- **AJAX** — расчёт цены брони идёт через `fetch` без перезагрузки страницы
+
+## Запуск
+
+База данных запускается локально на порту `5433`, Redis и приложение — в Docker.
+
+```
+mvn clean package -DskipTests
+docker compose up --build
+```
+
+- Приложение: `http://localhost:8090`
+- Параметры подключения к БД — в `src/main/resources/application.properties`
+- Схема таблиц создаётся при старте (`ddl-auto: update`)
+- Хэш пароля админа можно получить через вспомогательный класс `Main`
+
+Для запуска без Docker (`mvn spring-boot:run`) в `application.properties` нужно будет заменить `host.docker.internal` на `localhost` для базы и Redis.
